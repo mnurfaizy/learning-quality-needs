@@ -1,2 +1,3 @@
-# learning-quality-needs
-Berisi kebutuhan learning quality yang dapat diakses secara public
+# Learning Quality Needs
+
+Repository ini bersifat publik. Ini berisi berbagai macam kebutuhan learning quality, terutama yang berformat code dan markdown sebagai catatan input kepada model AI atau Automation.
