@@ -1,0 +1,336 @@
+---
+name: l3-assessment-generator
+description: "Generate a Kirkpatrick Level 3 Behavior Assessment (.xlsx) from training materials. Use when user provides a training syllabus or full materials and asks for an L3 rubric, L3 assessment, or behavior assessment. Output is a 3-sheet Excel file: assessment form, interpretation guide, and filled example."
+---
+
+# L3 Behaviour Assessment Generator
+
+## What this skill produces
+A 3-sheet `.xlsx` file:
+- **Sheet 1 — "L3 Assessment"**: Blank form to be filled by direct supervisor (atasan langsung)
+- **Sheet 2 — "Panduan Membaca Hasil"**: Score interpretation guide
+- **Sheet 3 — "Contoh Pengisian"**: Pre-filled example with sample scores
+
+---
+
+## Step 1 — Derive competencies from materials
+
+Read the training materials and extract:
+- Program name (for title)
+- Session topics / learning objectives
+
+Map each major topic to **1 competency**. Write 2–4 behavioral items per competency. Total items: 12–18.
+
+### Competency naming rules
+- Name must reflect a behavioral capacity, not a topic label
+- Example: Topic "Responsible AI Governance" → Competency "Responsible AI Governance" (same is fine if behavioral)
+- Example: Topic "AI Evolution Narrative" → Competency "Strategic AI Framing"
+
+### Item writing rules (CRITICAL)
+Each item must have 5 fields:
+
+**Pertanyaan** (question to supervisor):
+- Always starts with: `"Selama 3 bulan ke belakang, apakah ada perubahan dalam cara [nama peserta]..."`
+- Must be a YES/NO-style behavioral change question
+- Must reference a specific framework, concept, or behavior taught in the session
+
+**Indikator Keberhasilan** (success indicator):
+- What "good" looks like in one sentence
+- Starts with "Peserta mampu..."
+
+**Perilaku yang Dinilai** (behavior being assessed):
+- The specific observable behavior being rated
+- More specific than the Indikator
+
+**Skor 1–5 anchors** (behavioral descriptors, BARS format):
+- Skor 1: "Tidak ada perubahan — [specific baseline behavior]"
+- Skor 2: "Ada [awareness/upaya], namun [limitation]"
+- Skor 3: "Peserta mulai [behavior], namun [limitation]"
+- Skor 4: "Peserta secara konsisten [behavior]"
+- Skor 5: "Peserta menjadi [role model / reference point / champion] — [specific impact]"
+
+---
+
+## Step 2 — Color palette
+
+### Global colors
+```python
+TEAL_DARK  = "1F4E5F"   # title/header backgrounds
+WHITE      = "FFFFFF"
+YELLOW     = "FFF9C4"   # identity input fields + NILAI column
+GRAY_LT    = "F2F3F4"   # alternating row fill
+GRAY_MID   = "D5D8DC"   # sub-header rows
+```
+
+### Per-competency colors — derived from training slide materials
+
+**Step 1: Extract brand colors from the slide PDF visually.**
+Before writing any code, inspect the first 3–5 pages of the training material PDF. Identify the dominant brand colors used in the slide design (backgrounds, headers, accent shapes). Extract up to N hex colors where N = number of competencies.
+
+For each extracted brand color:
+- Use it as the `"dark"` value (for cell backgrounds where text must be white)
+- Derive a light tint (~15–20% opacity equivalent) as the `"light"` value (for alternating fills where text is dark)
+- Light tint formula: blend the dark color toward white at ~85%. Example: dark `"1F3864"` → light `"D6E4F0"`
+
+**Step 2: Fallback if extracted colors < number of competencies.**
+If the slide palette yields fewer distinct colors than needed, fill remaining slots with these fixed fallback colors (in order):
+
+```python
+FALLBACK_COMP_COLORS = [
+    {"dark": "1F3864", "light": "D6E4F0"},   # Biru Tua
+    {"dark": "4A235A", "light": "E8D5F5"},   # Ungu
+    {"dark": "1E5631", "light": "D5F5E3"},   # Hijau Tua
+    {"dark": "7B241C", "light": "FADBD8"},   # Merah Tua
+    {"dark": "5D4037", "light": "EFEBE9"},   # Coklat Tua
+]
+```
+
+Final `COMP_COLORS` dict maps competency number → one color pair, using slide-extracted colors first, fallback colors for the rest. The SAME color pair is used in both the rubric table AND the summary table for that competency.
+
+### Font contrast rule (CRITICAL — apply to every colored cell)
+
+The font color must always be readable against the cell background. Use this rule without exception:
+
+```
+IF cell background is a DARK color (dark hex values, e.g. "dark" key from COMP_COLORS)
+    → font color = WHITE ("FFFFFF")
+
+IF cell background is a LIGHT color (light hex values, e.g. "light" key from COMP_COLORS,
+   SCORE_COLORS, GRAY_LT, GRAY_MID, YELLOW, "EAECEE", "D6EAF8")
+    → font color = BLACK ("000000") or default dark
+
+```
+
+Practical mapping:
+- Competency cells using `COMP_COLORS[no]["light"]` → black font
+- TEAL_DARK backgrounds (title, headers, OVERALL row) → white font
+- GRAY_MID sub-headers → black font
+- SCORE_COLORS cells (all light tones) → black font
+- YELLOW cells (identity inputs, NILAI) → black font
+
+**Never place dark text on a dark background or white text on a light background.**
+
+### Score column colors (data cells only — NOT headers)
+Apply to columns G–K (Skor 1–5) for every data row. Fixed regardless of competency. All light tones → black font.
+
+```python
+SCORE_COLORS = {
+    7:  "FFCDD2",   # Skor 1 — light red    → black font
+    8:  "FFE0B2",   # Skor 2 — light orange → black font
+    9:  "FFF9C4",   # Skor 3 — light yellow → black font
+    10: "C8E6C9",   # Skor 4 — light green  → black font
+    11: "A5D6A7",   # Skor 5 — medium green → black font
+}
+```
+
+---
+
+## Step 3 — Excel structure
+
+### Column layout (12 columns, A–L)
+```
+A  No Komp.               width=8
+B  Kompetensi             width=26
+C  No Item                width=8
+D  Pertanyaan             width=38
+E  Indikator Keberhasilan width=32
+F  Perilaku yang Dinilai  width=32
+G  Skor 1                 width=26
+H  Skor 2                 width=26
+I  Skor 3                 width=26
+J  Skor 4                 width=26
+K  Skor 5                 width=26
+L  NILAI (1–5)            width=12
+```
+
+### Sheet 1 — "L3 Assessment" row layout
+
+```
+Row 1:   TITLE "L3 BEHAVIOUR ASSESSMENT"
+         → merged A1:L1, bold size 14, white on TEAL_DARK, center
+
+Row 2:   Program name
+         → merged A2:L2, italic size 10, white on TEAL_DARK, center
+
+Row 3:   blank (height=8)
+
+Rows 4–8: Identity fields — ONE ROW PER FIELD
+         → A:C merged = label text (bold, bg="EAECEE", va=center)
+         → D:H merged = input field (bg=YELLOW, thin border, va=center)
+         Labels: Nama Peserta / Nama Pengisi (Atasan Langsung) /
+                 Jabatan Pengisi / Divisi / Departemen / Tanggal Pengisian
+
+Row 9:   blank (height=8)
+
+Row 10:  PETUNJUK PENGISIAN instruction text
+         → merged A10:L10, italic size 9, bg="D6EAF8", va=center, height=45
+
+Row 11:  Column headers
+         → 12 individual cells, bold size 9, white on TEAL_DARK, center, wrap, height=42
+         Headers: No Komp. | Kompetensi | No Item | Pertanyaan (diisi oleh Atasan) |
+                  Indikator Keberhasilan | Perilaku yang Dinilai |
+                  Skor 1\nTidak ada perubahan | Skor 2\nPerubahan minimal |
+                  Skor 3\nPerubahan moderat | Skor 4\nPerubahan signifikan |
+                  Skor 5\nPerubahan sangat signifikan | NILAI\n(1–5)
+
+Rows 12+: Data rows (one row per item, height=90)
+         - Col A (No Komp): merged vertically across all items in competency,
+                            value=comp number, bold, center, bg=COMP_COLORS[no]["light"], border
+         - Col B (Kompetensi): merged vertically across all items in competency,
+                            value=comp name, bold, center, bg=COMP_COLORS[no]["light"], border
+         - Col C (No Item): float value, center, top, thin border,
+                            alternating bg: GRAY_LT (odd idx) / WHITE (even idx)
+         - Cols D–F: text content, size 9, top-left, wrap, thin border,
+                     same alternating bg as col C
+         - Cols G–K (Skor 1–5): size 8, top-left, wrap, thin border,
+                     bg = SCORE_COLORS[col_index]  ← FIXED COLOR PER SCORE LEVEL, NOT per row
+         - Col L (NILAI): bold size 11, center, middle, bg=YELLOW, thin border
+                          value=None for Sheet 1 / integer for Sheet 3
+
+Gap row: blank (height=10)
+
+RINGKASAN SKOR section:
+  Header: merged A:L, "RINGKASAN SKOR", bold size 12, white on TEAL_DARK, center, height=30
+
+  Sub-header: height=22
+    - A:B merged: "Kompetensi", bold, bg=GRAY_MID, center
+    - C: "Jumlah Item", bold, bg=GRAY_MID, center, border
+    - D: "Rata-rata Skor", bold, bg=GRAY_MID, center, border
+    - E:L merged: "Interpretasi", bold, bg=GRAY_MID, center
+
+  One row per competency: height=24
+    - A:B merged: "{no}. {name}", size 10, bg=COMP_COLORS[no]["light"], left  ← SAME COLOR AS RUBRIC
+    - C: item count, center, bg=COMP_COLORS[no]["light"], border
+    - D: AVERAGE formula, bold size 10, center, bg=COMP_COLORS[no]["light"], border
+    - E:L merged: IFS interpretation formula, italic size 10, bg=COMP_COLORS[no]["light"], left
+
+  OVERALL row: height=28
+    - A:B merged: "OVERALL — Rata-rata Keseluruhan", bold size 11, white on TEAL_DARK
+    - C: total item count, bold, white on TEAL_DARK, center, border
+    - D: overall AVERAGE formula, bold size 11, white on TEAL_DARK, center, border
+    - E:L merged: overall IFS formula, bold italic, white on TEAL_DARK, left
+```
+
+### Ringkasan Skor formulas
+
+**Average per competency** (show empty string when no scores entered):
+```
+=IF(COUNTA(L{r1},L{r2},...,L{rn})=0,"",ROUND(AVERAGE(L{r1},L{r2},...,L{rn}),2))
+```
+
+**Interpretation** (show empty string when average is blank — auto-populates once scores are entered):
+```
+=IF(D{row}="","",IFS(
+  D{row}>=4.5,"Transformatif — peserta menjadi role model",
+  D{row}>=3.5,"Signifikan — pembelajaran terinternalisasi",
+  D{row}>=2.5,"Moderat — butuh konsistensi dan follow-up",
+  D{row}>=1.5,"Minimal — perlu pendampingan intensif",
+  TRUE,"Tidak Ada Perubahan — evaluasi akar masalah"))
+```
+
+**CRITICAL**: Never use "—" as placeholder in interpretation. Always use `""` so the column appears empty until NILAI is filled.
+
+### Sheet 2 — "Panduan Membaca Hasil" (4 columns A–D)
+```
+Col A width=18, B width=22, C width=38, D width=42
+
+Row 1: Title (merged A:D), white on TEAL_DARK
+Row 2: Program name (merged A:D), white on TEAL_DARK
+
+Section A: "SKALA PENILAIAN & INTERPRETASI"
+- Section header (merged A:D), white on TEAL_DARK
+- Sub-header: Rentang Skor | Label | Makna Perubahan Perilaku | Rekomendasi Tindak Lanjut
+- 5 data rows (one per score level 4.5–5.0 down to 1.0–1.4), height=55, alternating fill, wrap, border
+
+Section B: "PANDUAN MEMBACA HASIL PER KOMPETENSI"
+- Section header (merged A:D), white on TEAL_DARK
+- For each competency:
+    - Competency name row (merged A:D), bold, bg="D6EAF8", height=22
+    - 📌 Fokus Kompetensi row (merged A:D), size 9, bg=WHITE, height=55
+    - 💡 Catatan Interpretasi row (merged A:D), italic size 9, bg=GRAY_LT, height=55
+    - blank gap row
+
+Section C: "CARA MEMBACA HASIL KESELURUHAN"
+- Section header (merged A:D), white on TEAL_DARK
+- 5 bullet-point rows (▸), alternating fill, height=30
+```
+
+### Sheet 3 — "Contoh Pengisian"
+Identical structure to Sheet 1, with:
+- Pre-filled identity fields (fictional Indonesian names)
+- Pre-filled NILAI column with realistic sample scores — mix of 2, 3, 4, 5 (never all the same value)
+- Ringkasan formulas auto-calculate from sample scores
+
+---
+
+## Step 4 — Code pattern
+
+```python
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+wb = Workbook()
+
+# Build competency data structure first — derived from training materials
+competencies = [
+  {
+    "no": 1,
+    "name": "...",
+    "items": [
+      {
+        "no_item": 1,
+        "pertanyaan": "Selama 3 bulan ke belakang...",
+        "indikator": "Peserta mampu...",
+        "perilaku": "...",
+        "skor1": "Tidak ada perubahan — ...",
+        "skor2": "Ada ..., namun ...",
+        "skor3": "Peserta mulai ..., namun ...",
+        "skor4": "Peserta secara konsisten ...",
+        "skor5": "Peserta menjadi [role model] — ...",
+      },
+    ]
+  },
+]
+
+# Helper functions: fill(), thin_border(), sc() for single cell, mc() for merged cell,
+# merge_rows() for vertical merge across rows in one column
+
+# Build Sheet 1 (blank form)
+ws1 = wb.active
+ws1.title = "L3 Assessment"
+build_assessment_sheet(ws1, sample_scores=None)
+
+# Build Sheet 2 (interpretation guide)
+ws2 = wb.create_sheet("Panduan Membaca Hasil")
+build_panduan_sheet(ws2)
+
+# Build Sheet 3 (filled example)
+ws3 = wb.create_sheet("Contoh Pengisian")
+sample = {
+    "identity": ["[Name]", "[Supervisor Name]", "[Title]", "[Division]", "[Date]"],
+    "scores": {1: 4, 2: 5, 3: 3, ...},   # no_item → integer score
+}
+build_assessment_sheet(ws3, sample_scores=sample)
+
+wb.save("/mnt/user-data/outputs/L3_Assessment_{ProgramName}.xlsx")
+```
+
+---
+
+## Quality checklist before saving
+- [ ] Slide PDF visually inspected — brand colors extracted before code is written
+- [ ] COMP_COLORS built from slide palette; fallback colors used for any shortfall
+- [ ] Every colored cell: font color is WHITE on dark bg, BLACK on light bg — no exceptions
+- [ ] Identity rows: label merged A:C (bg=EAECEE, black font), input field merged D:H (bg=YELLOW, black font, border)
+- [ ] Score cells G–K: bg = SCORE_COLORS by column index — same across ALL rows, black font
+- [ ] Competency cells (cols A, B, merged vertically): bg = COMP_COLORS[no]["light"], black font
+- [ ] Summary competency rows: bg = COMP_COLORS[no]["light"] — matching rubric color, black font
+- [ ] TEAL_DARK cells (title, col headers, OVERALL, section headers): white font
+- [ ] Interpretation column: shows "" when NILAI empty, auto-fills via IFS formula when scores entered
+- [ ] All NILAI cells: YELLOW bg, bold size 11, center-middle, thin border, black font
+- [ ] Sheet 3 sample scores are varied (not all same value)
+- [ ] No formula errors (#REF!, #DIV/0!, #VALUE!, #NAME?)
+- [ ] All output text in Bahasa Indonesia
+- [ ] Program name in rows 1–2 matches the actual training program
+- [ ] Every item is directly traceable to session content — no generic filler items
